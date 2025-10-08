@@ -210,19 +210,6 @@ cd amplifier-module-hooks-approval
 python -m pytest tests/ -v
 ```
 
-### Integration Tests
-
-```bash
-cd amplifier-dev
-python test_integration.py
-```
-
-### Smoke Test
-
-```bash
-python smoke_test_approval.py
-```
-
 ## Philosophy Compliance
 
 This system follows Amplifier's kernel philosophy:
