@@ -1,7 +1,7 @@
 [project]
 name = "amplifier-module-hooks-approval"
 version = "0.1.0"
-description = "Approval hook module for Amplifier - coordinates user approval for tool actions"
+description = "Reference hook module - User approval workflow for Amplifier"
 requires-python = ">=3.11"
 dependencies = [
     "amplifier-core",
