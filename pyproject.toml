@@ -3,13 +3,11 @@ name = "amplifier-module-hooks-approval"
 version = "0.1.0"
 description = "Reference hook module - User approval workflow for Amplifier"
 requires-python = ">=3.11"
-dependencies = [
-    "amplifier-core",
-]
+dependencies = ["amplifier-core"]
 
 [project.entry-points."amplifier.modules"]
 hooks-approval = "amplifier_mod_hooks_approval:mount"
 
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
