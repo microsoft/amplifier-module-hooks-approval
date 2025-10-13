@@ -2,6 +2,20 @@
 
 Intercepts tool execution requests and coordinates user approval before dangerous operations.
 
+## Prerequisites
+
+- **Python 3.11+**
+- **[UV](https://github.com/astral-sh/uv)** - Fast Python package manager
+
+### Installing UV
+
+```bash
+# macOS/Linux/WSL
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Windows
+powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
 ## Features
 
 - Hook-based interception via `tool:pre` events

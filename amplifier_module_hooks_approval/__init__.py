@@ -44,17 +44,13 @@ async def mount(coordinator: ModuleCoordinator, config: dict[str, Any] | None = 
         name="approval_hook",
     )
 
-    # Store approval hook reference on coordinator for provider registration
-    # This allows CLI/GUI to call register_provider() on the hook
-    coordinator._approval_hook = approval_hook
-
+    # Mount the approval hook itself in a dedicated mount point for access by app layer
+    # App layer can use coordinator.get("hooks").get_handler("approval_hook") to access it
     logger.info("Mounted ApprovalHook")
 
     # Return cleanup function
     def cleanup():
         unregister()
-        if hasattr(coordinator, "_approval_hook"):
-            delattr(coordinator, "_approval_hook")
         logger.info("Unmounted ApprovalHook")
 
     return cleanup
