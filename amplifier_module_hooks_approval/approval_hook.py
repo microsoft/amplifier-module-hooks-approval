@@ -8,6 +8,9 @@ from amplifier_core import ApprovalProvider
 from amplifier_core import ApprovalRequest
 from amplifier_core import ApprovalResponse
 from amplifier_core import HookResult
+from amplifier_core.events import APPROVAL_DENIED
+from amplifier_core.events import APPROVAL_GRANTED
+from amplifier_core.events import APPROVAL_REQUIRED
 
 from .audit import audit_log
 from .config import DEFAULT_RULES
@@ -27,10 +30,11 @@ class ApprovalHook:
     - Log all decisions to audit trail
     """
 
-    def __init__(self, config: dict[str, Any]):
+    def __init__(self, config: dict[str, Any], hooks=None):
         """Initialize approval hook with configuration."""
         self.config = config
         self.provider: ApprovalProvider | None = None
+        self.hooks = hooks  # HookRegistry for emitting approval events
         self.rules = config.get("rules", DEFAULT_RULES)
         self.default_action = config.get("default_action", "deny")
         self.audit_enabled = config.get("audit", {}).get("enabled", True)
@@ -69,6 +73,13 @@ class ApprovalHook:
         # Build approval request
         request = self._build_request(tool_name, arguments)
 
+        # Emit approval:required event
+        if self.hooks:
+            await self.hooks.emit(
+                APPROVAL_REQUIRED,
+                {"data": {"tool": tool_name, "action": request.action, "risk_level": request.risk_level}},
+            )
+
         # Check for auto-action rules first
         auto_action = check_auto_action(self.rules, tool_name, arguments)
         if auto_action:
@@ -82,8 +93,16 @@ class ApprovalHook:
                 audit_log(request, response)
 
             if auto_action == "auto_approve":
+                # Emit approval:granted event
+                if self.hooks:
+                    await self.hooks.emit(
+                        APPROVAL_GRANTED, {"data": {"tool": tool_name, "reason": "Auto-approved by rule"}}
+                    )
                 return HookResult(action="continue")
-            # auto_deny
+
+            # auto_deny - emit approval:denied event
+            if self.hooks:
+                await self.hooks.emit(APPROVAL_DENIED, {"data": {"tool": tool_name, "reason": "Auto-denied by rule"}})
             return HookResult(action="deny", reason="Auto-denied by rule")
 
         # Request approval from provider
@@ -94,9 +113,21 @@ class ApprovalHook:
             if self.audit_enabled:
                 audit_log(request, response)
 
-            # Return hook result
+            # Emit appropriate event
             if response.approved:
+                if self.hooks:
+                    await self.hooks.emit(
+                        APPROVAL_GRANTED,
+                        {"data": {"tool": tool_name, "reason": response.reason or "User approved"}},
+                    )
                 return HookResult(action="continue")
+
+            # Denied
+            if self.hooks:
+                await self.hooks.emit(
+                    APPROVAL_DENIED,
+                    {"data": {"tool": tool_name, "reason": response.reason or "User denied"}},
+                )
             return HookResult(action="deny", reason=response.reason or "User denied approval")
 
         except TimeoutError:
@@ -107,6 +138,12 @@ class ApprovalHook:
                 response = ApprovalResponse(approved=False, reason="Approval request timed out")
                 audit_log(request, response)
 
+            # Emit denial event for timeout
+            if self.hooks:
+                await self.hooks.emit(
+                    APPROVAL_DENIED, {"data": {"tool": tool_name, "reason": "Approval request timed out"}}
+                )
+
             return HookResult(action=self.default_action, reason="Approval request timed out")
 
         except Exception as e:
@@ -116,6 +153,12 @@ class ApprovalHook:
             if self.audit_enabled:
                 response = ApprovalResponse(approved=False, reason=f"Provider error: {str(e)}")
                 audit_log(request, response)
+
+            # Emit denial event for error
+            if self.hooks:
+                await self.hooks.emit(
+                    APPROVAL_DENIED, {"data": {"tool": tool_name, "reason": f"Provider error: {str(e)}"}}
+                )
 
             return HookResult(action="deny", reason=f"Approval system error: {e}")
 

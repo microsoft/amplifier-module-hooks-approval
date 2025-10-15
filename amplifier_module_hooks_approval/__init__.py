@@ -27,14 +27,14 @@ async def mount(coordinator: ModuleCoordinator, config: dict[str, Any] | None = 
     """
     config = config or {}
 
-    # Create approval hook instance
-    approval_hook = ApprovalHook(config)
-
     # Get hooks registry from coordinator
     hooks: HookRegistry = coordinator.get("hooks")
     if not hooks:
         logger.error("No hooks registry available")
         return None
+
+    # Create approval hook instance with hooks registry for event emission
+    approval_hook = ApprovalHook(config, hooks=hooks)
 
     # Register for tool:pre events with high priority (runs early)
     unregister = hooks.register(
@@ -44,8 +44,9 @@ async def mount(coordinator: ModuleCoordinator, config: dict[str, Any] | None = 
         name="approval_hook",
     )
 
-    # Mount the approval hook itself in a dedicated mount point for access by app layer
-    # App layer can use coordinator.get("hooks").get_handler("approval_hook") to access it
+    # Register capability for app layer to register providers
+    coordinator.register_capability("approval.register_provider", approval_hook.register_provider)
+
     logger.info("Mounted ApprovalHook")
 
     # Return cleanup function
