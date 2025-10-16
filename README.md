@@ -27,27 +27,28 @@ powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
 
 ## Configuration
 
-```toml
-[[hooks]]
-module = "hooks-approval"
+Configure in your profile (see [PROFILE_AUTHORING.md](../../docs/PROFILE_AUTHORING.md)):
 
-[hooks.approval]
-default_action = "deny"  # Action on timeout/error
-
-[[hooks.approval.rules]]
-pattern = "ls*"
-action = "auto_approve"
-
-[[hooks.approval.rules]]
-pattern = "rm -rf /*"
-action = "auto_deny"
+```yaml
+# In your profile .md file
+---
+hooks:
+  - module: hooks-approval
+    config:
+      patterns:
+        - rm -rf
+        - sudo
+        - dd if=
+      auto_approve: false
+---
 ```
+
+**Working example:** See `amplifier-app-cli/amplifier_app_cli/data/profiles/full.md`
 
 ## Documentation
 
 - **[Usage Guide](USAGE_GUIDE.md)** - Complete guide with examples and troubleshooting
-- **[Configuration Example](config.example.toml)** - Sample configuration file
-- **[Implementation Plan](../../ai_working/amplifier-v2/IMPLEMENTATION_PLAN.md)** - Full implementation details
+- **[Profile Authoring Guide](../../docs/PROFILE_AUTHORING.md)** - How to configure hooks in profiles
 
 ## Philosophy
 

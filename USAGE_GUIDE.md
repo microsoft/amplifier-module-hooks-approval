@@ -13,18 +13,19 @@ The approval hook system provides user permission prompts for dangerous tool ope
 
 ### 1. Enable the Approval Hook
 
-Add to your config file:
+Add to your profile (see `amplifier-app-cli/amplifier_app_cli/data/profiles/full.md` for working example):
 
-```toml
-[[hooks]]
-module = "hooks-approval"
-
-[hooks.approval]
-default_action = "deny"  # What to do on timeout or provider failure
-
-[hooks.approval.audit]
-enabled = true
-file = "~/.amplifier/audit/approvals.jsonl"
+```yaml
+---
+hooks:
+  - module: hooks-approval
+    config:
+      patterns:
+        - rm -rf
+        - sudo
+        - dd if=
+      auto_approve: false
+---
 ```
 
 ### 2. Configure Tool Requirements
@@ -62,30 +63,28 @@ coordinator._approval_hook.register_provider(provider)
 
 ### Hook Configuration
 
-```toml
-[hooks.approval]
-# Action to take when approval times out or provider fails
-default_action = "deny"  # or "continue"
+Configure via your profile's hooks section:
 
-# Audit trail settings
-[hooks.approval.audit]
-enabled = true
-file = "~/.amplifier/audit/approvals.jsonl"
+```yaml
+hooks:
+  - module: hooks-approval
+    config:
+      # Dangerous command patterns that always require approval
+      patterns:
+        - rm -rf
+        - sudo
+        - dd if=
+        - mkfs
+        - iptables
 
-# Auto-approval rules (optional)
-[[hooks.approval.rules]]
-pattern = "ls*"
-action = "auto_approve"
+      # Auto-approve mode (use with caution)
+      auto_approve: false
 
-[[hooks.approval.rules]]
-pattern = "rm -rf /*"
-action = "auto_deny"
-
-[[hooks.approval.rules]]
-tool = "bash"
-risk_level = "high"
-require_approval = true
+      # Default action on timeout/error
+      default_action: deny  # or "continue"
 ```
+
+**Note:** The module currently supports pattern-based blocking. Rule-based auto-approval is planned for future versions.
 
 ### Rule Matching Priority
 
