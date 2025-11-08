@@ -57,31 +57,31 @@ class ApprovalHook:
 
         Args:
             event: Event name ("tool:pre")
-            data: Event data with 'tool', 'arguments', and optionally 'tool_obj'
+            data: Event data with 'tool_name', 'tool_input', and optionally 'tool_obj'
 
         Returns:
             HookResult with continue or deny action
         """
-        tool_name = data.get("tool", "unknown")
-        arguments = data.get("arguments", {})
+        tool_name = data.get("tool_name", "unknown")
+        tool_input = data.get("tool_input", {})
         tool_obj = data.get("tool_obj")  # Tool object if provided by orchestrator
 
         # Check if needs approval
-        if not self._needs_approval(tool_name, arguments, tool_obj):
+        if not self._needs_approval(tool_name, tool_input, tool_obj):
             return HookResult(action="continue")
 
         # Build approval request
-        request = self._build_request(tool_name, arguments)
+        request = self._build_request(tool_name, tool_input)
 
         # Emit approval:required event
         if self.hooks:
             await self.hooks.emit(
                 APPROVAL_REQUIRED,
-                {"data": {"tool": tool_name, "action": request.action, "risk_level": request.risk_level}},
+                {"tool_name": tool_name, "action": request.action, "risk_level": request.risk_level},
             )
 
         # Check for auto-action rules first
-        auto_action = check_auto_action(self.rules, tool_name, arguments)
+        auto_action = check_auto_action(self.rules, tool_name, tool_input)
         if auto_action:
             logger.info(f"Auto-action '{auto_action}' for {tool_name}")
 
@@ -95,14 +95,12 @@ class ApprovalHook:
             if auto_action == "auto_approve":
                 # Emit approval:granted event
                 if self.hooks:
-                    await self.hooks.emit(
-                        APPROVAL_GRANTED, {"data": {"tool": tool_name, "reason": "Auto-approved by rule"}}
-                    )
+                    await self.hooks.emit(APPROVAL_GRANTED, {"tool_name": tool_name, "reason": "Auto-approved by rule"})
                 return HookResult(action="continue")
 
             # auto_deny - emit approval:denied event
             if self.hooks:
-                await self.hooks.emit(APPROVAL_DENIED, {"data": {"tool": tool_name, "reason": "Auto-denied by rule"}})
+                await self.hooks.emit(APPROVAL_DENIED, {"tool_name": tool_name, "reason": "Auto-denied by rule"})
             return HookResult(action="deny", reason="Auto-denied by rule")
 
         # Request approval from provider
@@ -118,7 +116,7 @@ class ApprovalHook:
                 if self.hooks:
                     await self.hooks.emit(
                         APPROVAL_GRANTED,
-                        {"data": {"tool": tool_name, "reason": response.reason or "User approved"}},
+                        {"tool_name": tool_name, "reason": response.reason or "User approved"},
                     )
                 return HookResult(action="continue")
 
@@ -126,7 +124,7 @@ class ApprovalHook:
             if self.hooks:
                 await self.hooks.emit(
                     APPROVAL_DENIED,
-                    {"data": {"tool": tool_name, "reason": response.reason or "User denied"}},
+                    {"tool_name": tool_name, "reason": response.reason or "User denied"},
                 )
             return HookResult(action="deny", reason=response.reason or "User denied approval")
 
@@ -140,9 +138,7 @@ class ApprovalHook:
 
             # Emit denial event for timeout
             if self.hooks:
-                await self.hooks.emit(
-                    APPROVAL_DENIED, {"data": {"tool": tool_name, "reason": "Approval request timed out"}}
-                )
+                await self.hooks.emit(APPROVAL_DENIED, {"tool_name": tool_name, "reason": "Approval request timed out"})
 
             return HookResult(action=self.default_action, reason="Approval request timed out")
 
@@ -156,19 +152,17 @@ class ApprovalHook:
 
             # Emit denial event for error
             if self.hooks:
-                await self.hooks.emit(
-                    APPROVAL_DENIED, {"data": {"tool": tool_name, "reason": f"Provider error: {str(e)}"}}
-                )
+                await self.hooks.emit(APPROVAL_DENIED, {"tool_name": tool_name, "reason": f"Provider error: {str(e)}"})
 
             return HookResult(action="deny", reason=f"Approval system error: {e}")
 
-    def _needs_approval(self, tool_name: str, arguments: dict[str, Any], tool_obj: Any = None) -> bool:
+    def _needs_approval(self, tool_name: str, tool_input: dict[str, Any], tool_obj: Any = None) -> bool:
         """
         Check if tool execution needs approval.
 
         Args:
             tool_name: Name of the tool
-            arguments: Tool arguments
+            tool_input: Tool input parameters
             tool_obj: Tool object (optional) to check for require_approval attribute
 
         Returns:
@@ -185,7 +179,7 @@ class ApprovalHook:
 
         # Special handling for bash - check for dangerous patterns
         if tool_name == "bash":
-            command = arguments.get("command", "")
+            command = tool_input.get("command", "")
             # Always require approval for bash unless explicitly safe
             # Check for dangerous patterns that ALWAYS need approval
             dangerous_patterns = ["rm", "sudo", "chmod", "chown", "dd", "mkfs", ">", ">>"]
@@ -198,20 +192,20 @@ class ApprovalHook:
         high_risk_tools = ["write", "edit", "bash", "execute", "run"]
         return tool_name in high_risk_tools
 
-    def _build_request(self, tool_name: str, arguments: dict[str, Any]) -> ApprovalRequest:
+    def _build_request(self, tool_name: str, tool_input: dict[str, Any]) -> ApprovalRequest:
         """
         Build approval request from tool info.
 
         Args:
             tool_name: Name of the tool
-            arguments: Tool arguments
+            tool_input: Tool input parameters
 
         Returns:
             ApprovalRequest with details
         """
         # Determine action description
         if tool_name == "bash":
-            action = f"Execute: {arguments.get('command', 'unknown command')}"
+            action = f"Execute: {tool_input.get('command', 'unknown command')}"
         else:
             action = f"Execute {tool_name}"
 
@@ -222,7 +216,7 @@ class ApprovalHook:
         request = ApprovalRequest(
             tool_name=tool_name,
             action=action,
-            details=arguments,
+            details=tool_input,
             risk_level=risk_level,
             timeout=self.config.get("default_timeout"),  # None by default
         )
