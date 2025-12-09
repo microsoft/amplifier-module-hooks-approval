@@ -3,6 +3,9 @@ Approval hook module for Amplifier.
 Coordinates user approval requests via pluggable providers.
 """
 
+# Amplifier module metadata
+__amplifier_module_type__ = "hook"
+
 import logging
 from typing import Any
 
