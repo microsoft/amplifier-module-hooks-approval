@@ -37,7 +37,7 @@ async def mount(coordinator: ModuleCoordinator, config: dict[str, Any] | None = 
         return None
 
     # Create approval hook instance with hooks registry for event emission
-    approval_hook = ApprovalHook(config, hooks=hooks)
+    approval_hook = ApprovalHook(config, hooks=hooks, coordinator=coordinator)
 
     # Register for tool:pre events with high priority (runs early)
     unregister = hooks.register(
