@@ -39,6 +39,9 @@ class ApprovalHook:
         self.rules = config.get("rules", DEFAULT_RULES)
         self.default_action = config.get("default_action", "deny")
         self.audit_enabled = config.get("audit", {}).get("enabled", True)
+        # When true, ONLY use require_approval_tools from session state
+        # Skip built-in high-risk checks - let policy module (e.g., modes) drive decisions
+        self.policy_driven_only = config.get("policy_driven_only", False)
 
         logger.debug(f"ApprovalHook initialized with {len(self.rules)} rules")
 
@@ -216,6 +219,11 @@ class ApprovalHook:
                         f"Tool '{tool_name}' requires approval (set by policy module)"
                     )
                     return True
+
+        # If policy_driven_only mode, skip all built-in checks below
+        # This allows policy modules (like modes) to fully control approval decisions
+        if self.policy_driven_only:
+            return False
 
         # First check if tool has require_approval attribute
         if (

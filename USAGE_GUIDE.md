@@ -82,6 +82,29 @@ hooks:
 
       # Default action on timeout/error
       default_action: deny  # or "continue"
+
+      # Policy-driven mode: only check require_approval_tools from session state
+      # When true, skips built-in high-risk checks - lets policy modules drive decisions
+      policy_driven_only: false
+```
+
+### Policy-Driven Mode
+
+When `policy_driven_only: true`, the approval hook delegates approval decisions entirely to other modules (like the modes system). It only checks `session_state["require_approval_tools"]` and skips all built-in high-risk pattern checks.
+
+This is useful when:
+- Another module (e.g., modes hook) controls which tools need approval
+- You want dynamic, context-aware approval policies
+- Built-in patterns would conflict with your policy module
+
+Example with modes bundle:
+```yaml
+hooks:
+  - module: hooks-approval
+    config:
+      rules: []
+      default_action: continue
+      policy_driven_only: true  # Let modes system drive approval decisions
 ```
 
 **Note:** The module currently supports pattern-based blocking. Rule-based auto-approval is planned for future versions.
