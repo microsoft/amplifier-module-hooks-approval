@@ -40,6 +40,7 @@ class ApprovalHook:
         self.audit_enabled = config.get("audit", {}).get("enabled", True)
 
         logger.debug(f"ApprovalHook initialized with {len(self.rules)} rules")
+        self._remembered_decisions: dict[str, bool] = {}
 
     def register_provider(self, provider: ApprovalProvider) -> None:
         """
@@ -70,6 +71,39 @@ class ApprovalHook:
         if not self._needs_approval(tool_name, tool_input, tool_obj):
             return HookResult(action="continue")
 
+        # Check if this decision was previously remembered
+        context_key = self._build_remember_key(tool_name, data)
+        if context_key in self._remembered_decisions:
+            remembered = self._remembered_decisions[context_key]
+            if remembered:
+                logger.info(
+                    f"Auto-approved {tool_name} (remembered decision for {context_key})"
+                )
+                if self.hooks:
+                    await self.hooks.emit(
+                        APPROVAL_GRANTED,
+                        {
+                            "tool_name": tool_name,
+                            "reason": f"Remembered approval for {context_key}",
+                        },
+                    )
+                return HookResult(action="continue")
+            else:
+                logger.info(
+                    f"Auto-denied {tool_name} (remembered decision for {context_key})"
+                )
+                if self.hooks:
+                    await self.hooks.emit(
+                        APPROVAL_DENIED,
+                        {
+                            "tool_name": tool_name,
+                            "reason": f"Remembered denial for {context_key}",
+                        },
+                    )
+                return HookResult(
+                    action="deny", reason=f"Remembered denial for {context_key}"
+                )
+
         # Build approval request
         request = self._build_request(tool_name, tool_input)
 
@@ -77,7 +111,11 @@ class ApprovalHook:
         if self.hooks:
             await self.hooks.emit(
                 APPROVAL_REQUIRED,
-                {"tool_name": tool_name, "action": request.action, "risk_level": request.risk_level},
+                {
+                    "tool_name": tool_name,
+                    "action": request.action,
+                    "risk_level": request.risk_level,
+                },
             )
 
         # Check for auto-action rules first
@@ -88,19 +126,26 @@ class ApprovalHook:
             # Log to audit trail
             if self.audit_enabled:
                 response = ApprovalResponse(
-                    approved=(auto_action == "auto_approve"), reason=f"Auto-action: {auto_action}"
+                    approved=(auto_action == "auto_approve"),
+                    reason=f"Auto-action: {auto_action}",
                 )
                 audit_log(request, response)
 
             if auto_action == "auto_approve":
                 # Emit approval:granted event
                 if self.hooks:
-                    await self.hooks.emit(APPROVAL_GRANTED, {"tool_name": tool_name, "reason": "Auto-approved by rule"})
+                    await self.hooks.emit(
+                        APPROVAL_GRANTED,
+                        {"tool_name": tool_name, "reason": "Auto-approved by rule"},
+                    )
                 return HookResult(action="continue")
 
             # auto_deny - emit approval:denied event
             if self.hooks:
-                await self.hooks.emit(APPROVAL_DENIED, {"tool_name": tool_name, "reason": "Auto-denied by rule"})
+                await self.hooks.emit(
+                    APPROVAL_DENIED,
+                    {"tool_name": tool_name, "reason": "Auto-denied by rule"},
+                )
             return HookResult(action="deny", reason="Auto-denied by rule")
 
         # Request approval from provider
@@ -111,12 +156,22 @@ class ApprovalHook:
             if self.audit_enabled:
                 audit_log(request, response)
 
+            # Store decision if remember was requested
+            if response.remember:
+                self._remembered_decisions[context_key] = response.approved
+                logger.info(
+                    f"Remembered {'approval' if response.approved else 'denial'} for {context_key}"
+                )
+
             # Emit appropriate event
             if response.approved:
                 if self.hooks:
                     await self.hooks.emit(
                         APPROVAL_GRANTED,
-                        {"tool_name": tool_name, "reason": response.reason or "User approved"},
+                        {
+                            "tool_name": tool_name,
+                            "reason": response.reason or "User approved",
+                        },
                     )
                 return HookResult(action="continue")
 
@@ -124,39 +179,60 @@ class ApprovalHook:
             if self.hooks:
                 await self.hooks.emit(
                     APPROVAL_DENIED,
-                    {"tool_name": tool_name, "reason": response.reason or "User denied"},
+                    {
+                        "tool_name": tool_name,
+                        "reason": response.reason or "User denied",
+                    },
                 )
-            return HookResult(action="deny", reason=response.reason or "User denied approval")
+            return HookResult(
+                action="deny", reason=response.reason or "User denied approval"
+            )
 
         except TimeoutError:
             # Timeout expired - use default action
-            logger.warning(f"Approval timeout for {tool_name}, using default: {self.default_action}")
+            logger.warning(
+                f"Approval timeout for {tool_name}, using default: {self.default_action}"
+            )
 
             if self.audit_enabled:
-                response = ApprovalResponse(approved=False, reason="Approval request timed out")
+                response = ApprovalResponse(
+                    approved=False, reason="Approval request timed out"
+                )
                 audit_log(request, response)
 
             # Emit denial event for timeout
             if self.hooks:
-                await self.hooks.emit(APPROVAL_DENIED, {"tool_name": tool_name, "reason": "Approval request timed out"})
+                await self.hooks.emit(
+                    APPROVAL_DENIED,
+                    {"tool_name": tool_name, "reason": "Approval request timed out"},
+                )
 
-            return HookResult(action=self.default_action, reason="Approval request timed out")
+            return HookResult(
+                action=self.default_action, reason="Approval request timed out"
+            )
 
         except Exception as e:
             # Provider error - fail safe (deny)
             logger.error(f"Approval provider error: {e}", exc_info=True)
 
             if self.audit_enabled:
-                response = ApprovalResponse(approved=False, reason=f"Provider error: {str(e)}")
+                response = ApprovalResponse(
+                    approved=False, reason=f"Provider error: {str(e)}"
+                )
                 audit_log(request, response)
 
             # Emit denial event for error
             if self.hooks:
-                await self.hooks.emit(APPROVAL_DENIED, {"tool_name": tool_name, "reason": f"Provider error: {str(e)}"})
+                await self.hooks.emit(
+                    APPROVAL_DENIED,
+                    {"tool_name": tool_name, "reason": f"Provider error: {str(e)}"},
+                )
 
             return HookResult(action="deny", reason=f"Approval system error: {e}")
 
-    def _needs_approval(self, tool_name: str, tool_input: dict[str, Any], tool_obj: Any = None) -> bool:
+    def _needs_approval(
+        self, tool_name: str, tool_input: dict[str, Any], tool_obj: Any = None
+    ) -> bool:
         """
         Check if tool execution needs approval.
 
@@ -169,7 +245,11 @@ class ApprovalHook:
             True if approval needed
         """
         # First check if tool has require_approval attribute
-        if tool_obj and hasattr(tool_obj, "require_approval") and tool_obj.require_approval:
+        if (
+            tool_obj
+            and hasattr(tool_obj, "require_approval")
+            and tool_obj.require_approval
+        ):
             return True
 
         # Check config for tool-specific approval requirements
@@ -182,7 +262,16 @@ class ApprovalHook:
             command = tool_input.get("command", "")
             # Always require approval for bash unless explicitly safe
             # Check for dangerous patterns that ALWAYS need approval
-            dangerous_patterns = ["rm", "sudo", "chmod", "chown", "dd", "mkfs", ">", ">>"]
+            dangerous_patterns = [
+                "rm",
+                "sudo",
+                "chmod",
+                "chown",
+                "dd",
+                "mkfs",
+                ">",
+                ">>",
+            ]
             if any(pattern in command.lower() for pattern in dangerous_patterns):
                 return True
             # For bash, default to requiring approval unless auto-approved by rules
@@ -192,7 +281,49 @@ class ApprovalHook:
         high_risk_tools = ["write", "edit", "bash", "execute", "run"]
         return tool_name in high_risk_tools
 
-    def _build_request(self, tool_name: str, tool_input: dict[str, Any]) -> ApprovalRequest:
+    def _build_remember_key(self, tool_name: str, event_data: dict[str, Any]) -> str:
+        """Build a scoped key for remembered approval decisions.
+
+        Keys are scoped by tool_name + context to prevent a single
+        remembered approval from becoming a blanket bypass.
+
+        - Filesystem tools (write_file, edit_file, read_file): key by directory
+        - bash: key by command prefix (first two tokens)
+        - Other tools: key by tool name alone
+        """
+        tool_input = event_data.get("tool_input", {})
+
+        filesystem_tools = {"write_file", "edit_file", "read_file"}
+        if tool_name in filesystem_tools:
+            file_path = tool_input.get("file_path", "")
+            from pathlib import PurePosixPath
+
+            parent = str(PurePosixPath(file_path).parent)
+            if parent == ".":
+                return f"{tool_name}:."
+            # Ensure trailing slash for directory matching
+            if not parent.endswith("/"):
+                parent += "/"
+            return f"{tool_name}:{parent}"
+
+        if tool_name == "bash":
+            command = tool_input.get("command", "")
+            # Use first two tokens as prefix (e.g., "git push")
+            tokens = command.split()
+            if len(tokens) >= 2:
+                prefix = f"{tokens[0]} {tokens[1]}"
+            elif len(tokens) == 1:
+                prefix = tokens[0]
+            else:
+                prefix = ""
+            return f"{tool_name}:{prefix}"
+
+        # Fallback: tool name only
+        return tool_name
+
+    def _build_request(
+        self, tool_name: str, tool_input: dict[str, Any]
+    ) -> ApprovalRequest:
         """
         Build approval request from tool info.
 
@@ -240,11 +371,15 @@ class ApprovalHook:
         if not self.provider:
             # No provider registered - auto-deny for safety
             logger.warning("No approval provider registered, auto-denying")
-            return ApprovalResponse(approved=False, reason="No approval provider available")
+            return ApprovalResponse(
+                approved=False, reason="No approval provider available"
+            )
 
         # Call provider with optional timeout
         if request.timeout is not None:
-            response = await asyncio.wait_for(self.provider.request_approval(request), timeout=request.timeout)
+            response = await asyncio.wait_for(
+                self.provider.request_approval(request), timeout=request.timeout
+            )
         else:
             response = await self.provider.request_approval(request)
 
