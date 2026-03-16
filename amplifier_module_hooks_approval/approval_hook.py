@@ -39,6 +39,8 @@ class ApprovalHook:
         self.default_action = config.get("default_action", "deny")
         self.audit_enabled = config.get("audit", {}).get("enabled", True)
 
+        self._remembered_decisions: dict[str, bool] = {}
+
         logger.debug(f"ApprovalHook initialized with {len(self.rules)} rules")
 
     def register_provider(self, provider: ApprovalProvider) -> None:
@@ -69,6 +71,15 @@ class ApprovalHook:
         # Check if needs approval
         if not self._needs_approval(tool_name, tool_input, tool_obj):
             return HookResult(action="continue")
+
+        # Check remembered decisions
+        remember_key = self._build_remember_key(tool_name, tool_input)
+        if remember_key in self._remembered_decisions:
+            remembered = self._remembered_decisions[remember_key]
+            if remembered:
+                return HookResult(action="continue")
+            else:
+                return HookResult(action="deny", reason="Previously denied (remembered)")
 
         # Build approval request
         request = self._build_request(tool_name, tool_input)
@@ -106,6 +117,10 @@ class ApprovalHook:
         # Request approval from provider
         try:
             response = await self._request_approval(request)
+
+            # Store remembered decision if requested
+            if hasattr(response, 'remember') and response.remember:
+                self._remembered_decisions[remember_key] = response.approved
 
             # Log decision
             if self.audit_enabled:
@@ -189,8 +204,29 @@ class ApprovalHook:
             return True  # Changed: Always require approval for bash by default
 
         # Check if tool is in high-risk list
-        high_risk_tools = ["write", "edit", "bash", "execute", "run"]
+        high_risk_tools = ["write_file", "edit_file", "bash", "execute", "run"]
         return tool_name in high_risk_tools
+
+    def _build_remember_key(self, tool_name: str, tool_input: dict[str, Any]) -> str:
+        """Build a scoped key for remembered decisions.
+
+        Filesystem tools: keyed by directory (write_file:src/)
+        Bash: keyed by command prefix (bash:git push)
+        Others: tool name only
+        """
+        if tool_name in ("write_file", "edit_file"):
+            path = tool_input.get("file_path", tool_input.get("path", ""))
+            if path:
+                from pathlib import PurePosixPath
+                parent = str(PurePosixPath(path).parent)
+                return f"{tool_name}:{parent}"
+        elif tool_name == "bash":
+            command = tool_input.get("command", "")
+            # Use first two words as command prefix
+            parts = command.strip().split()[:2]
+            prefix = " ".join(parts) if parts else ""
+            return f"bash:{prefix}"
+        return tool_name
 
     def _build_request(self, tool_name: str, tool_input: dict[str, Any]) -> ApprovalRequest:
         """
