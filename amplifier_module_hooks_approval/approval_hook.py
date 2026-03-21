@@ -35,7 +35,7 @@ class ApprovalHook:
         self.config = config
         self.provider: ApprovalProvider | None = None
         self.hooks = hooks  # HookRegistry for emitting approval events
-        self.coordinator = coordinator  # For accessing session_state (mode integration)
+        self.coordinator = coordinator  # For accessing capabilities (mode integration)
         self.rules = config.get("rules", DEFAULT_RULES)
         self.default_action = config.get("default_action", "deny")
         self.audit_enabled = config.get("audit", {}).get("enabled", True)
@@ -208,17 +208,15 @@ class ApprovalHook:
             True if approval needed
         """
         # Check if any policy module flagged this tool for confirmation
-        # Generic mechanism: any module can populate session_state["require_approval_tools"]
+        # Generic mechanism: policy modules register approval.needs_check capability
         # to dynamically require approval for specific tools
         if self.coordinator is not None:
-            session_state = getattr(self.coordinator, "session_state", None)
-            if session_state is not None:
-                require_approval = session_state.get("require_approval_tools", set())
-                if tool_name in require_approval:
-                    logger.debug(
-                        f"Tool '{tool_name}' requires approval (set by policy module)"
-                    )
-                    return True
+            needs_check = self.coordinator.get_capability("approval.needs_check")
+            if needs_check and needs_check(tool_name):
+                logger.debug(
+                    f"Tool '{tool_name}' requires approval (set by policy module)"
+                )
+                return True
 
         # If policy_driven_only mode, skip all built-in checks below
         # This allows policy modules (like modes) to fully control approval decisions
