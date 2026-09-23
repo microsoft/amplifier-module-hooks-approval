@@ -107,15 +107,19 @@ hooks:
       policy_driven_only: true  # Let modes system drive approval decisions
 ```
 
-**Note:** The module currently supports pattern-based blocking. Rule-based auto-approval is planned for future versions.
+Auto-action rules use case-insensitive shell-command globs. The executable name must
+be literal; wildcards are allowed only after it (for example, `ls *`). Auto-action
+rules never match commands containing shell control operators, redirects, command
+substitution, variable expansion, or multiple lines. Commands explicitly marked as
+requiring approval by policy, tool metadata, or tool configuration cannot be
+auto-approved.
 
 ### Rule Matching Priority
 
 Rules are evaluated in order:
-1. Exact tool + command pattern match
-2. Tool name match
-3. Risk level match
-4. Default behavior (check metadata)
+1. Explicit approval requirements
+2. Safe, fully matched auto-action command patterns
+3. Approval provider decision
 
 ## Approval Request Flow
 
