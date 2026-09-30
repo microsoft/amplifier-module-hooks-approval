@@ -6,10 +6,11 @@ Inherits authoritative tests from amplifier-core.
 from types import SimpleNamespace
 
 import pytest
-from amplifier_core import ApprovalResponse
+from amplifier_core import ApprovalResponse, HookRegistry
 from amplifier_core.events import APPROVAL_GRANTED
 from amplifier_core.validation.behavioral import HookBehaviorTests
 
+from amplifier_module_hooks_approval import mount
 from amplifier_module_hooks_approval.approval_hook import ApprovalHook
 
 
@@ -107,3 +108,65 @@ async def test_dangerous_command_cannot_be_auto_approved():
 
     assert result.action == "deny"
     assert len(provider.requests) == 1
+
+
+@pytest.mark.asyncio
+async def test_mounted_hook_auto_denies_compound_commands_and_skips_blank_patterns():
+    hooks = HookRegistry()
+    capabilities = {}
+    coordinator = SimpleNamespace(session_state={})
+    coordinator.get = lambda name: hooks if name == "hooks" else None
+    coordinator.register_capability = capabilities.__setitem__
+    sentinel_calls = []
+
+    async def sentinel(event, data):
+        sentinel_calls.append((event, data))
+
+    cleanup = await mount(
+        coordinator,
+        {
+            "audit": {"enabled": False},
+            "rules": [{"pattern": "rm *", "action": "auto_deny"}],
+        },
+    )
+    granting_provider = RecordingProvider(approved=True)
+    capabilities["approval.register_provider"](granting_provider)
+    hooks.register("tool:pre", sentinel, priority=0, name="sentinel")
+
+    result = await hooks.emit(
+        "tool:pre",
+        {
+            "tool_name": "bash",
+            "tool_call_id": "deny-rule",
+            "tool_input": {"command": "rm a; echo harmless"},
+        },
+    )
+
+    assert result.action == "deny"
+    assert granting_provider.requests == []
+    assert sentinel_calls == []
+    cleanup()
+
+    cleanup = await mount(
+        coordinator,
+        {
+            "audit": {"enabled": False},
+            "rules": [{"pattern": " ", "action": "auto_deny"}],
+        },
+    )
+    denying_provider = RecordingProvider(approved=False)
+    capabilities["approval.register_provider"](denying_provider)
+
+    result = await hooks.emit(
+        "tool:pre",
+        {
+            "tool_name": "bash",
+            "tool_call_id": "blank-pattern",
+            "tool_input": {"command": "echo harmless"},
+        },
+    )
+
+    assert result.action == "deny"
+    assert len(denying_provider.requests) == 1
+    assert sentinel_calls == []
+    cleanup()

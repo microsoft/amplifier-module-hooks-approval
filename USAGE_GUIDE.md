@@ -107,12 +107,13 @@ hooks:
       policy_driven_only: true  # Let modes system drive approval decisions
 ```
 
-Auto-action rules use case-insensitive shell-command globs. The executable name must
-be literal; wildcards are allowed only after it (for example, `ls *`). Auto-action
-rules never match commands containing shell control operators, redirects, command
-substitution, variable expansion, or multiple lines. Commands explicitly marked as
-requiring approval by policy, tool metadata, or tool configuration cannot be
-auto-approved.
+Auto-approval rules use case-insensitive shell-command globs. The executable name
+must be literal; wildcards are allowed only after it (for example, `ls *`).
+Auto-approval rules do not match commands containing shell control operators,
+redirects, command substitution, variable expansion, or multiple lines. Auto-deny
+rules still apply to compound commands and may glob executable names. Blank or
+non-string rule patterns are skipped. Commands explicitly marked as requiring
+approval by policy, tool metadata, or tool configuration cannot be auto-approved.
 
 ### Rule Matching Priority
 

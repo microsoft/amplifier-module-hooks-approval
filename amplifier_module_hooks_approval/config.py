@@ -29,14 +29,14 @@ def _is_simple_shell_command(command: Any) -> bool:
 
 def _has_literal_executable(pattern: str) -> bool:
     """Require rules to name the executable rather than globbing its name."""
-    executable_pattern = pattern.lstrip().split(maxsplit=1)[0]
-    return "*" not in executable_pattern
+    tokens = pattern.lstrip().split(maxsplit=1)
+    return bool(tokens) and "*" not in tokens[0]
 
 
 def _matches_pattern(command: str, pattern: str) -> bool:
     """Match a fully anchored pattern where only asterisks are wildcards."""
     regex_pattern = re.escape(pattern).replace(r"\*", ".*")
-    return re.fullmatch(regex_pattern, command, re.IGNORECASE) is not None
+    return re.fullmatch(regex_pattern, command, re.IGNORECASE | re.DOTALL) is not None
 
 
 def check_auto_action(
@@ -56,22 +56,25 @@ def check_auto_action(
     # For bash tool, check command patterns
     if tool_name == "bash":
         command = arguments.get("command", "")
-        if not _is_simple_shell_command(command):
+        if not isinstance(command, str) or not command.strip():
             return None
 
         for rule in rules:
+            if not isinstance(rule, dict):
+                continue
+
             pattern = rule.get("pattern", "")
             action = rule.get("action")
 
-            if (
-                not isinstance(pattern, str)
-                or not pattern
-                or not action
-                or not _has_literal_executable(pattern)
-            ):
+            if not isinstance(pattern, str) or not pattern.strip() or not action:
                 continue
 
             if _matches_pattern(command, pattern):
+                if action == "auto_approve" and (
+                    not _is_simple_shell_command(command)
+                    or not _has_literal_executable(pattern)
+                ):
+                    continue
                 return action
 
     return None
