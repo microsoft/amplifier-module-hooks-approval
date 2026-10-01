@@ -4,19 +4,29 @@ import asyncio
 import logging
 from typing import Any
 
-from amplifier_core import ApprovalProvider
-from amplifier_core import ApprovalRequest
-from amplifier_core import ApprovalResponse
-from amplifier_core import HookResult
-from amplifier_core.events import APPROVAL_DENIED
-from amplifier_core.events import APPROVAL_GRANTED
-from amplifier_core.events import APPROVAL_REQUIRED
+from amplifier_core import (
+    ApprovalProvider,
+    ApprovalRequest,
+    ApprovalResponse,
+    HookResult,
+)
+from amplifier_core.events import APPROVAL_DENIED, APPROVAL_GRANTED, APPROVAL_REQUIRED
 
 from .audit import audit_log
-from .config import DEFAULT_RULES
-from .config import check_auto_action
+from .config import DEFAULT_RULES, check_auto_action
 
 logger = logging.getLogger(__name__)
+
+_DANGEROUS_BASH_PATTERNS = [
+    "rm",
+    "sudo",
+    "chmod",
+    "chown",
+    "dd",
+    "mkfs",
+    ">",
+    ">>",
+]
 
 
 class ApprovalHook:
@@ -90,6 +100,16 @@ class ApprovalHook:
 
         # Check for auto-action rules first
         auto_action = check_auto_action(self.rules, tool_name, tool_input)
+        if auto_action == "auto_approve" and self._requires_explicit_approval(
+            tool_name, tool_input, tool_obj
+        ):
+            logger.info(
+                "Ignoring auto-approval rule for '%s' because explicit approval "
+                "is required",
+                tool_name,
+            )
+            auto_action = None
+
         if auto_action:
             logger.info(f"Auto-action '{auto_action}' for {tool_name}")
 
@@ -243,17 +263,7 @@ class ApprovalHook:
             command = tool_input.get("command", "")
             # Always require approval for bash unless explicitly safe
             # Check for dangerous patterns that ALWAYS need approval
-            dangerous_patterns = [
-                "rm",
-                "sudo",
-                "chmod",
-                "chown",
-                "dd",
-                "mkfs",
-                ">",
-                ">>",
-            ]
-            if any(pattern in command.lower() for pattern in dangerous_patterns):
+            if self._is_dangerous_bash_command(command):
                 return True
             # For bash, default to requiring approval unless auto-approved by rules
             return True  # Changed: Always require approval for bash by default
@@ -261,6 +271,41 @@ class ApprovalHook:
         # Check if tool is in high-risk list
         high_risk_tools = ["write", "edit", "bash", "execute", "run"]
         return tool_name in high_risk_tools
+
+    def _requires_explicit_approval(
+        self, tool_name: str, tool_input: dict[str, Any], tool_obj: Any = None
+    ) -> bool:
+        """Return whether an approval requirement must not be auto-approved."""
+        if self.coordinator is not None:
+            session_state = getattr(self.coordinator, "session_state", None)
+            if session_state is not None:
+                require_approval = session_state.get("require_approval_tools", set())
+                if tool_name in require_approval:
+                    return True
+
+        if (
+            tool_obj
+            and hasattr(tool_obj, "require_approval")
+            and tool_obj.require_approval
+        ):
+            return True
+
+        tool_config = self.config.get("tools", {}).get(tool_name, {})
+        if tool_config.get("require_approval", False):
+            return True
+
+        if tool_name == "bash":
+            command = tool_input.get("command", "")
+            return self._is_dangerous_bash_command(command)
+
+        return False
+
+    @staticmethod
+    def _is_dangerous_bash_command(command: Any) -> bool:
+        """Return whether a Bash command requires a human decision."""
+        if not isinstance(command, str):
+            return True
+        return any(pattern in command.lower() for pattern in _DANGEROUS_BASH_PATTERNS)
 
     def _build_request(
         self, tool_name: str, tool_input: dict[str, Any]
